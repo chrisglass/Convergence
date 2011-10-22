@@ -47,26 +47,39 @@ var Convergence = {
       return;
     }
 
-    var tip = "";
-      
-    for (var i in status) {      
-      tip += (status[i].notary + " : " + this.stringifyResponseCode(status[i].status) + "\n");
+    if (!status.status) {
+      dump("Displaying certificate fialure notification\n");
+      this.displayCertificateFailureNotification(status);
     }
 
-    panel.tooltipText = tip;
+    var responseStatus = new ConvergenceResponseStatus(status.details);
+    panel.tooltipText  = responseStatus.toString();
   },
 
-  stringifyResponseCode: function(responseCode) {
-    if (responseCode < 0) 
-      return "Connectivity Failure";
+  displayCertificateFailureNotification: function(status) {
+    var message = 'Convergence Certificate Verification Failure';  
+    var nb      = gBrowser.getNotificationBox();  
+    var n       = nb.getNotificationWithValue('convergence-certificate-error');  
 
-    switch (responseCode) {
-    case 0: return "Verification Failure.";
-    case 1: return "Verification Success.";
-    case 3: return "Anonymization Relay.";
-    }
-
-    return "Unknown";
+    if(n) {  
+      n.label = message;  
+    } else {  
+      var buttons = [{  
+	  label: 'View Details',  
+	  accessKey: null,  
+	  popup: null,
+          callback: function() {  
+	    window.openDialog('chrome://convergence/content/exceptionDialog.xul', 
+			      'dialog', 'modal', status);
+	    return false;
+          }  
+        }];  
+      
+      const priority = nb.PRIORITY_WARNING_MEDIUM;  
+      nb.appendNotification(message, 'convergence-certificate-error',  
+			    'chrome://global/skin/icons/warning-16.png',
+			    priority, buttons);  
+    }  
   },
 
   initializeTabWatcher: function() {
@@ -100,42 +113,30 @@ var Convergence = {
   },
 
   addNotaryFromFile: function(path) {
-    var file = Components.classes["@mozilla.org/file/local;1"]
-    .createInstance(Components.interfaces.nsILocalFile);	
-    file.initWithPath(path);
+    var notary;
 
-    var convergenceManager = this.convergenceManager;
+    try {
+      notary = this.convergenceManager.getNewNotaryFromBundle(path);
+    } catch (exception) {
+      dump("Got exception: " + exception + " , " + exception.stack + "\n");
+      alert("Unknown Notary bundle version: " + exception.version + "!");
+      return;
+    }
 
-    NetUtil.asyncFetch(file, function(inputStream, status) {
-	if (!Components.isSuccessCode(status)) {
-	  return;
-	}
-	 
-	var data          = NetUtil.readInputStreamToString(inputStream, inputStream.available());
-	var notaryObject  = JSON.parse(data);
-	var promptService = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
-	.getService(Components.interfaces.nsIPromptService);
+    var settingsManager = this.convergenceManager.getSettingsManager();
 
-	var status        = promptService.confirm(null, "Trust This Notary?", 
-						  "Are you sure that you would like to trust this notary: \n\n" +
-						  notaryObject.host + "\n\n" +
-						  "To verify the authenticity of your secure communication?");
-	
-	if (status) {
-	  var notaryList = convergenceManager.getSettingsManager().getNotaryList();
-	  var notary     = convergenceManager.getNewNotary();
+    var promptService   = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
+                          .getService(Components.interfaces.nsIPromptService);
 
-	  notary.setHost(notaryObject.host);
-	  notary.setSSLPort(notaryObject.ssl_port);
-	  notary.setHTTPPort(notaryObject.http_port);
-	  notary.setCertificate(notaryObject.certificate);
-	  notary.setEnabled(true);
+    var status          = promptService.confirm(null, "Trust This Notary?", 
+						"Are you sure that you would like to trust this notary: \n\n" +
+						notary.name + "\n\n" +
+						"...to verify the authenticity of your secure communication?");
 
-	  notaryList.push(notary);
-	  convergenceManager.getSettingsManager().setNotaryList(notaryList);
-	  convergenceManager.getSettingsManager().savePreferences();
-	}
-      });
+    if (status) {
+      settingsManager.addNotary(notary);
+      settingsManager.savePreferences();
+    }
   },
 
   observe: function(subject, topic, data) {
@@ -201,8 +202,6 @@ var Convergence = {
     toolbar.setAttribute("currentset", toolbar.currentSet);
     document.persist(toolbar.id, "currentset");
   },
-
-
 };
 
 

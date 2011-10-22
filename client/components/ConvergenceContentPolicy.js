@@ -42,29 +42,12 @@ ConvergenceContentPolicy.prototype = {
     if (this.notaryExpression.test(aContentLocation.spec)) {
       dump("********* DETECTED NOTARY FILE ***************\n");
 
-      var uri           = this.getUriForSpec(aContentLocation.spec);
-      var temporaryFile = this.getTemporaryFile();      
-      var wbp           = Components.classes['@mozilla.org/embedding/browser/nsWebBrowserPersist;1']
-      .createInstance(Components.interfaces.nsIWebBrowserPersist);
-      
-      dump("Temporary file: " + temporaryFile.path + "\n");
+      ConvergenceUtil.persistUrl(aContentLocation.spec, function(temporaryFile) {
+	  var observerService = Components.classes["@mozilla.org/observer-service;1"]
+	                        .getService(Components.interfaces.nsIObserverService);  
+	  observerService.notifyObservers(observerService, "convergence-add-notary", temporaryFile.path);
+	});
 
-      wbp.progressListener = {
-	onProgressChange: function(aWebProgress, aRequest, aCurSelfProgress, aMaxSelfProgress, aCurTotalProgress, aMaxTotalProgress) {
-	},
-	onStateChange: function(aWebProgress, aRequest, aStateFlags, aStatus) {
-	  if ((aStateFlags & Components.interfaces.nsIWebProgressListener.STATE_STOP)) {
-	    var observerService = Components.classes["@mozilla.org/observer-service;1"]
-	    .getService(Components.interfaces.nsIObserverService);  
-	    observerService.notifyObservers(observerService, "convergence-add-notary", temporaryFile.path);
-	    dump("Notified observers...\n");
-	  }
-	}
-      }
-
-      wbp.persistFlags &= ~Components.interfaces.nsIWebBrowserPersist.PERSIST_FLAGS_NO_CONVERSION | Components.interfaces.nsIWebBrowserPersist.PERSIST_FLAGS_BYPASS_CACHE;
-      wbp.saveURI(uri, null, null, null, null, temporaryFile);
-            
       return Components.interfaces.nsIContentPolicy.REJECT_REQUEST;
     }
 
@@ -73,26 +56,6 @@ ConvergenceContentPolicy.prototype = {
 
   shouldProcess: function(aContentType, aContentLocation, aRequestOrigin, aContext, aMimeType, aExtra) {
     return true;
-  },
-
-  getTemporaryFile: function() {
-    var file = Components.classes["@mozilla.org/file/directory_service;1"].
-    getService(Components.interfaces.nsIProperties).
-    get("TmpD", Components.interfaces.nsIFile);
-
-    file.append("notary.tmp");
-    file.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0644);
-
-    return file;
-  },
-
-  getUriForSpec: function(spec) {
-    var uri = Components.classes["@mozilla.org/network/standard-url;1"]
-    .createInstance(Components.interfaces.nsIStandardURL);
-    uri.init(Components.interfaces.nsIStandardURL.URLTYPE_STANDARD, 80, spec, null, null);
-
-    uri = uri.QueryInterface(Components.interfaces.nsIURI);
-    return uri;
   },
 };
 
@@ -105,3 +68,38 @@ if (XPCOMUtils.generateNSGetFactory)
   var NSGetFactory = XPCOMUtils.generateNSGetFactory(components);
 else
   var NSGetModule = XPCOMUtils.generateNSGetModule(components);
+
+/** Component Loading **/
+
+var loadScript = function(isChrome, subdir, filename) {
+  try {
+    var path = __LOCATION__.parent.clone();
+
+    if (isChrome) {
+      path = path.parent.clone();
+      path.append("chrome");
+      path.append("content");
+    }
+
+    if (subdir != null) {
+      path.append(subdir);      
+    }
+
+    path.append(filename);
+
+    dump("Loading: " + path.path + "\n");
+
+    var fileProtocol = Components.classes["@mozilla.org/network/protocol;1?name=file"]
+    .getService(Components.interfaces["nsIFileProtocolHandler"]);
+    var loader       = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
+    .getService(Components.interfaces["mozIJSSubScriptLoader"]);
+        
+    loader.loadSubScript(fileProtocol.getURLSpecFromFile(path));
+
+    dump("Loaded!\n");
+  } catch (e) {
+    dump("Error loading component script: " + path.path + " : " + e + " , " + e.stack + "\n");
+  }
+};
+
+loadScript(true, "util", "ConvergenceUtil.js");

@@ -24,20 +24,21 @@ shutil.copyfile("convergence-bundle.py", "convergence/convergence-bundle")
 
 REQUIRES = ['twisted.web', 
             'twisted.enterprise', 
-            'twisted.internet', 
+            'twisted.internet',
+            'twisted.names',
             'OpenSSL', 
             'sqlite3'
            ]
 
 setup  (name             = 'convergence-notary',
-        version          = '0.2',
+        version          = '0.3',
         description      = 'An agile, distributed, and secure alternative to the Certificate Authority system.',
         author           = 'Moxie Marlinspike',
         author_email     = 'moxie@thoughtcrime.org',
         url              = 'http://convergence.io/',
         license          = 'GPL',
-        packages         = ["convergence"],
-        package_dir      = {'convergence' : 'convergence/'},
+        packages         = ["convergence", "convergence.verifier"],
+        package_dir      = {'convergence' : 'convergence/', 'convergence.verifier' : 'convergence/verifier'},
         scripts          = ['convergence/convergence-notary',
                             'convergence/convergence-gencert',
                             'convergence/convergence-createdb',

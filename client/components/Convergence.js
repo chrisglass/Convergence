@@ -42,6 +42,7 @@ function Convergence() {
     this.registerProxyObserver();
     this.registerObserverService();
 
+    this.initializeNotaryUpdateTimer(false);
     dump("Convergence Setup Complete.\n");
   } catch (e) {
     dump("Initializing error: " + e + " , " + e.stack + "\n");
@@ -63,6 +64,7 @@ Convergence.prototype = {
   sqliteFile:         null,
   cacheFile:          null,
   certificateManager: null,
+  timer:              Components.classes["@mozilla.org/timer;1"].createInstance(Components.interfaces.nsITimer),
 
   initializeCtypes: function() {
     try {
@@ -92,7 +94,7 @@ Convergence.prototype = {
   },
 
   initializeConnectionManager : function() {
-    this.connectionManager = new ConnectionManager(this.localProxy.getServerSocket(),
+    this.connectionManager = new ConnectionManager(this.localProxy.getListenSocket(),
 						   this.nssFile,
 						   this.sslFile,
 						   this.nsprFile,
@@ -134,20 +136,34 @@ Convergence.prototype = {
   
     this.cacheFile.append("convergence.sqlite");
 
-    var storageService = Components.classes["@mozilla.org/storage/service;1"]  
-    .getService(Components.interfaces.mozIStorageService);  
-    
-    var database = storageService.openDatabase(this.cacheFile);
+    var databaseHelper = new DatabaseHelper(this.cacheFile);
+
+    databaseHelper.initialize();
+    databaseHelper.close();
+  },
+
+  initializeNotaryUpdateTimer: function(reschedule) {
+    var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                .getService(Components.interfaces.nsIPrefService)
+                .getBranch("extensions.convergence.");
+
+    var updateBundleTime = 0;
 
     try {
-      database.executeSimpleSQL("CREATE TABLE fingerprints "                  + 
-				"(id integer primary key, location TEXT, "    + 
-				"fingerprint TEXT, timestamp INTEGER)");
-    } catch (e) {
-      dump("SQL exception: " + e + "\n");
+      if (!reschedule)
+	updateBundleTime = parseInt(prefs.getCharPref("updateBundleTime"));
+    } catch (e) {}
+
+    if (updateBundleTime == 0) {
+      updateBundleTime = Date.now() + (24 * 60 * 60 * 1000) + Math.floor((Math.random() * (12 * 60 * 60 *1000)));
+      // updateBundleTime = Date.now() + 10000;
+      prefs.setCharPref("updateBundleTime", updateBundleTime + "");
     }
 
-    database.close();
+    var difference = Math.max(1, updateBundleTime - Date.now());
+    this.timer.init(this, difference, 0);
+
+    dump("Timer will fire in: " + difference + "\n");
   },
 
   setEnabled: function(value) {
@@ -162,6 +178,10 @@ Convergence.prototype = {
 
   getNewNotary: function() {
     return new Notary();
+  },
+
+  getNewNotaryFromBundle: function(bundlePath) {
+    return Notary.constructFromBundle(bundlePath);
   },
 
   getSettingsManager: function() {
@@ -181,6 +201,7 @@ Convergence.prototype = {
     .getService(Components.interfaces.nsIObserverService);
     observerService.addObserver(this, "quit-application", false);
     observerService.addObserver(this, "network:offline-status-changed", false);
+    observerService.addObserver(this, "convergence-notary-updated", false);
   },
 
   registerProxyObserver: function() {
@@ -197,12 +218,28 @@ Convergence.prototype = {
       this.connectionManager.shutdown();      
     } else if (topic == 'network:offline-status-changed') {
       if (data == 'online') {
-	dump("Got network state change, shutting down serversocket...\n");
+	dump("Got network state change, shutting down listensocket...\n");
 	this.connectionManager.shutdown();
-	dump("Initializing serversocket...\n");
+	dump("Initializing listensocket...\n");
 	this.initializeConnectionManager();
       }
+    } else if (topic == 'timer-callback') {
+      dump("Got timer update...\n");
+      this.handleNotaryUpdates();
+    } else if (topic == 'convergence-notary-updated') {
+      dump("Got update callback...\n");
+      this.settingsManager.savePreferences();
     }
+  },
+
+  handleNotaryUpdates: function() {
+    var notaries = this.settingsManager.getNotaryList();
+    
+    for (var i in notaries) {
+      notaries[i].update();
+    }
+
+    this.initializeNotaryUpdateTimer(true);
   },
 
   isNotaryUri: function(uri) {
@@ -223,12 +260,18 @@ Convergence.prototype = {
 
     return false;
   },
+
+  isWhitelisted: function(uri) {
+    return uri.host == "localhost" ||
+           uri.host == "127.0.0.1" ||
+           uri.host == "aus3.mozilla.org";    
+  },
   
   applyFilter : function(protocolService, uri, proxy) {
     if (!this.enabled)
       return proxy;
 
-    if ((uri.scheme == "https") && (!this.isNotaryUri(uri))) {
+    if ((uri.scheme == "https") && (!this.isNotaryUri(uri)) && (!this.isWhitelisted(uri))) {
       this.connectionManager.setProxyTunnel(proxy);
 
       return this.localProxy.getProxyInfo();
@@ -302,17 +345,20 @@ loadScript(true, "ctypes", "NSS.js");
 loadScript(true, "ctypes", "SSL.js");
 loadScript(true, "ctypes", "SQLITE.js");
 
-loadScript(true, "sockets", "ConvergenceDestinationSocket.js");
+loadScript(true, "sockets", "ConvergenceListenSocket.js");
+loadScript(true, "sockets", "ConvergenceClientSocket.js");
 loadScript(true, "sockets", "ConvergenceServerSocket.js");
-loadScript(true, "sockets", "ConvergenceSocket.js");
 loadScript(true, "ctypes", "Serialization.js");
 loadScript(true, "ssl", "CertificateManager.js");
 loadScript(true, "ssl", "CertificateInfo.js");
-loadScript(true, "protocols", "HttpProxyServer.js");
+loadScript(true, "proxy", "HttpProxyServer.js");
 
 loadScript(false, null, "LocalProxy.js");
 
+loadScript(true, "ssl", "PhysicalNotary.js");
 loadScript(true, "ssl", "Notary.js");
 loadScript(false, null, "SettingsManager.js");
 loadScript(false, null, "ConnectionManager.js");
 loadScript(true, "ssl", "NativeCertificateCache.js");
+loadScript(false, null, "DatabaseHelper.js");
+loadScript(true, "util", "ConvergenceUtil.js");
