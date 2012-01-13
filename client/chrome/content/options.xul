@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-stylesheet href="options.css" type="text/css"?>
 
-<dialog id="convergence-options" title="Convergence Notary Preferences" xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" width="620" height="350" buttons="accept,cancel" onload="onOptionsLoad();" ondialogaccept="return onOptionsSave();">
+<dialog id="convergence-options" title="Convergence Notary Preferences" xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" width="620" height="450" buttons="accept,cancel" onload="onOptionsLoad();" ondialogaccept="return onOptionsSave();">
 
 <script src="options.js" />
 
@@ -43,6 +43,8 @@
 	<checkbox id="cache-certificates" label="Cache certificates locally." />
 	<checkbox id="notary-bounce" label="Anonymize communication with notaries." />
 	<checkbox id="connectivity-failure" label="Notary connectivity failure counts as authenticity failure."/>
+	<checkbox id="private-ip-exempt" label="Don't check RFC 1918 (private) IP addresses." />
+	<checkbox id="private-pki-exempt" label="Whitelist private PKI signatures." />
 
 	<groupbox>
 	  <caption label="Verification Threshold"/>
@@ -51,6 +53,12 @@
 	    <radio id="majority" label="Require notary majority." />
 	    <radio id="minority" label="Require only one notary to agree." />
 	  </radiogroup>
+	  <separator />
+	  <hbox>
+	    <label value="Max subset of notaries to query: " control="notary-quorum"/>
+	    <textbox id="notary-quorum" type="number" min="1" max="20" value="3" 
+		     increment="1" decimalplaces="0" maxlength="2" size="2"/>
+	  </hbox>
 	</groupbox>
 	</vbox>
     </tabpanel>

@@ -38,7 +38,7 @@ function Convergence() {
 
     this.initializeLocalProxy();
     this.initializeConnectionManager();
-
+    this.initializeRegularExpressions();
     this.registerProxyObserver();
     this.registerObserverService();
 
@@ -64,6 +64,7 @@ Convergence.prototype = {
   sqliteFile:         null,
   cacheFile:          null,
   certificateManager: null,
+  rfc1918:            null,
   timer:              Components.classes["@mozilla.org/timer;1"].createInstance(Components.interfaces.nsITimer),
 
   initializeCtypes: function() {
@@ -96,16 +97,24 @@ Convergence.prototype = {
   initializeConnectionManager : function() {
     if (this.certificateManager != null) {
       this.connectionManager = new ConnectionManager(this.localProxy.getListenSocket(),
-						     this.nssFile,
-						     this.sslFile,
-						     this.nsprFile,
-						     this.sqliteFile,
-						     this.cacheFile,
-						     this.certificateManager,
-						     this.settingsManager);
+                                                     this.nssFile,
+                                                     this.sslFile,
+                                                     this.nsprFile,
+                                                     this.sqliteFile,
+                                                     this.cacheFile,
+                                                     this.certificateManager,
+                                                     this.settingsManager);
     }
   },
 
+  initializeRegularExpressions: function() {
+    this.rfc1918 = new RegExp("(^10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$)|" +
+                              "(^172\\.1[6-9]\\.\\d{1,3}\\.\\d{1,3}$)|"  +
+                              "(^172\\.2[0-9]\\.\\d{1,3}\\.\\d{1,3}$)|"  +
+                              "(^172\\.3[0-1]\\.\\d{1,3}\\.\\d{1,3}$)|"  +
+                              "(^192\\.168\\.\\d{1,3}\\.\\d{1,3}$)");
+  },
+  
   initializeLocalProxy: function() {
     this.localProxy = new LocalProxy();
   },
@@ -135,7 +144,7 @@ Convergence.prototype = {
     
     if (this.certificateManager.needsReboot) {
       Components.classes["@mozilla.org/toolkit/app-startup;1"].getService(Components.interfaces.nsIAppStartup)
-      .quit(Components.interfaces.nsIAppStartup.eRestart | Components.interfaces.nsIAppStartup.eAttemptQuit);
+        .quit(Components.interfaces.nsIAppStartup.eRestart | Components.interfaces.nsIAppStartup.eAttemptQuit);
     }
 
     return true;
@@ -143,9 +152,9 @@ Convergence.prototype = {
 
   initializeCertificateCache: function() {
     this.cacheFile = Components.classes["@mozilla.org/file/directory_service;1"]  
-    .getService(Components.interfaces.nsIProperties)  
-    .get("ProfD", Components.interfaces.nsIFile);  
-  
+      .getService(Components.interfaces.nsIProperties)  
+      .get("ProfD", Components.interfaces.nsIFile);  
+    
     this.cacheFile.append("convergence.sqlite");
 
     var databaseHelper = new DatabaseHelper(this.cacheFile);
@@ -163,7 +172,7 @@ Convergence.prototype = {
 
     try {
       if (!reschedule)
-	updateBundleTime = parseInt(prefs.getCharPref("updateBundleTime"));
+        updateBundleTime = parseInt(prefs.getCharPref("updateBundleTime"));
     } catch (e) {}
 
     if (updateBundleTime == 0) {
@@ -181,9 +190,9 @@ Convergence.prototype = {
   setEnabled: function(value) {
     if (value && (this.certificateManager == null)) {      
       if (this.initializeCertificateManager())
-	this.initializeConnectionManager();
+        this.initializeConnectionManager();
       else 
-	return;
+        return;
     }
 
     this.enabled = value;
@@ -217,7 +226,7 @@ Convergence.prototype = {
 
   registerObserverService: function() {
     var observerService = Components.classes["@mozilla.org/observer-service;1"]
-    .getService(Components.interfaces.nsIObserverService);
+      .getService(Components.interfaces.nsIObserverService);
     observerService.addObserver(this, "quit-application", false);
     observerService.addObserver(this, "network:offline-status-changed", false);
     observerService.addObserver(this, "convergence-notary-updated", false);
@@ -225,7 +234,7 @@ Convergence.prototype = {
 
   registerProxyObserver: function() {
     var protocolService = Components.classes["@mozilla.org/network/protocol-proxy-service;1"]
-    .getService(Components.interfaces.nsIProtocolProxyService);
+      .getService(Components.interfaces.nsIProtocolProxyService);
 
     protocolService.unregisterFilter(this);
     protocolService.registerFilter(this, 9999);
@@ -235,14 +244,14 @@ Convergence.prototype = {
     if (topic == 'quit-application') {
       dump("Got application shutdown request...\n");
       if (this.connectionManager != null)
-	this.connectionManager.shutdown();      
+        this.connectionManager.shutdown();      
     } else if (topic == 'network:offline-status-changed') {
       if (data == 'online') {
-	dump("Got network state change, shutting down listensocket...\n");
-	if (this.connectionManager != null)
-	  this.connectionManager.shutdown();
-	dump("Initializing listensocket...\n");
-	this.initializeConnectionManager();
+        dump("Got network state change, shutting down listensocket...\n");
+        if (this.connectionManager != null)
+          this.connectionManager.shutdown();
+        dump("Initializing listensocket...\n");
+        this.initializeConnectionManager();
       }
     } else if (topic == 'timer-callback') {
       dump("Got timer update...\n");
@@ -271,11 +280,15 @@ Convergence.prototype = {
       uriPort = 443;
 
     for (var i in notaries) {
-      if ((notaries[i].host == uri.host) && 
-	  ((notaries[i].httpPort == uriPort) || 
-	   (notaries[i].sslPort == uriPort)))
-      {
-	return true;
+      var physicalNotaries = notaries[i].getPhysicalNotaries();
+
+      for (var j in physicalNotaries) {
+        if ((physicalNotaries[j].host == uri.host) && 
+            ((physicalNotaries[i].httpPort == uriPort) || 
+             (physicalNotaries[i].sslPort == uriPort)))
+        {
+          return true;
+        }
       }
     }
 
@@ -283,9 +296,11 @@ Convergence.prototype = {
   },
 
   isWhitelisted: function(uri) {
-    return uri.host == "localhost" ||
-           uri.host == "127.0.0.1" ||
-           uri.host == "aus3.mozilla.org";    
+    return uri.host == "localhost"        ||
+           uri.host == "127.0.0.1"        ||
+           uri.host == "aus3.mozilla.org" ||
+           (this.settingsManager.getPrivateIpExempt() && 
+            this.rfc1918.test(uri.host));
   },
   
   applyFilter : function(protocolService, uri, proxy) {
@@ -349,10 +364,10 @@ var loadScript = function(isChrome, subdir, filename) {
     dump("Loading: " + path.path + "\n");
 
     var fileProtocol = Components.classes["@mozilla.org/network/protocol;1?name=file"]
-    .getService(Components.interfaces["nsIFileProtocolHandler"]);
+      .getService(Components.interfaces["nsIFileProtocolHandler"]);
     var loader       = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
-    .getService(Components.interfaces["mozIJSSubScriptLoader"]);
-        
+      .getService(Components.interfaces["mozIJSSubScriptLoader"]);
+    
     loader.loadSubScript(fileProtocol.getURLSpecFromFile(path));
 
     dump("Loaded!\n");
